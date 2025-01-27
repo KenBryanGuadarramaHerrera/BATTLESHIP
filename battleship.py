@@ -1,14 +1,31 @@
 #!/usr/bin/env python
 # -*- coding: utf-8 -*-
 
-# Importing pygame modules
-import random, sys, pygame
+import random
+import time
+import sys
+import pygame
+import serial  # Importar la biblioteca serial para comunicación con Arduino
 from pygame.locals import *
+from joystick_control import read_joystick
+
+# Estructura global para rastrear los barcos y sus coordenadas
+ship_positions = {}
+
+# Configuración del puerto serie
+try:
+    arduino = read_joystick()
+    print("Arduino conectado exitosamente.")
+    arduino_connected = True
+except serial.SerialException:
+    print("Advertencia: No se pudo conectar al Arduino. Continuando sin joystick.")
+    arduino = None
+    arduino_connected = False
 
 # Set variables, like screen width and height 
 
 # globals
-FPS = 30 #Determines the number of frames per second
+FPS = 60 #Determines the number of frames per second
 REVEALSPEED = 8 #Determines the speed at which the squares reveals after being clicked
 WINDOWWIDTH = 800 #Width of game window
 WINDOWHEIGHT = 600 #Height of game window
@@ -26,7 +43,8 @@ EXPLOSIONSPEED = 10 #How fast the explosion graphics will play
 XMARGIN = int((WINDOWWIDTH - (BOARDWIDTH * TILESIZE) - DISPLAYWIDTH - MARKERSIZE) / 2) #x-position of the top left corner of board 
 YMARGIN = int((WINDOWHEIGHT - (BOARDHEIGHT * TILESIZE) - MARKERSIZE) / 2) #y-position of the top left corner of board
 
-#Colours which will be used by the game
+# Colores
+
 BLACK   = (  0,   0,   0)
 WHITE   = (255, 255, 255)
 GREEN   = (  0, 204,   0)
@@ -34,131 +52,275 @@ GRAY    = ( 60,  60,  60)
 BLUE    = (  0,  50, 255)
 YELLOW  = (255, 255,   0)
 DARKGRAY =( 40,  40,  40)
+SEA =  (70, 130, 180)
+RED = (255, 0, 0)
+BGCOLOR = (0, 128, 128)
+#Selecciona background
+GBG = pygame.image.load("assets/game_background.jpg")
 
-#Determine what to colour each element of the game
-BGCOLOR = GRAY
-BUTTONCOLOR = GREEN
+
+BUTTONCOLOR = SEA
 TEXTCOLOR = WHITE
-TILECOLOR = GREEN
+TILECOLOR = SEA
 BORDERCOLOR = BLUE
 TEXTSHADOWCOLOR = BLUE
 SHIPCOLOR = YELLOW
-HIGHLIGHTCOLOR = BLUE
+HIGHLIGHTCOLOR = RED
 
+#INICIAR MEZCLADOR DE AUDIO
+pygame.mixer.init()
+#EFECTO select
+select_sound = pygame.mixer.Sound("sound/select.mp3")  # Asegúrate de que el archivo esté en el directorio correcto
+select_sound.set_volume(0.5)  # Ajustar el volumen del efecto de sonido
+#EFECTO explosión
+boom_sound = pygame.mixer.Sound("sound/boom.mp3")
+boom_sound.set_volume(0.5)
+#EFECTO bomba al agua
+fail_sound = pygame.mixer.Sound("sound/fail.mp3")
+fail_sound.set_volume(0.5)
+#EFECTO victoria
+win_sound = pygame.mixer.Sound("sound/win.mp3")
+win_sound.set_volume(0.6)
 
+return_to_menu = False
+# Función principal
 def main():
-    """
-    The main function intializes the variables which will be used by the game.
-    """
+
     global DISPLAYSURF, FPSCLOCK, BASICFONT, HELP_SURF, HELP_RECT, NEW_SURF, \
            NEW_RECT, SHOTS_SURF, SHOTS_RECT, BIGFONT, COUNTER_SURF, \
-           COUNTER_RECT, HBUTTON_SURF, EXPLOSION_IMAGES
+           COUNTER_RECT, EXPLOSION_IMAGES,X_SURF,X_RECT,B_SURF,B_RECT
+    # Inicialización de Pygame
     pygame.init()
-    FPSCLOCK = pygame.time.Clock()
-    #Fonts used by the game
     DISPLAYSURF = pygame.display.set_mode((WINDOWWIDTH, WINDOWHEIGHT))
-    BASICFONT = pygame.font.Font("font.ttf", 20)
-    BIGFONT = pygame.font.Font("font.ttf", 50)
+    pygame.display.set_caption('Battleship')
+    FPSCLOCK = pygame.time.Clock()
+    BASICFONT = pygame.font.Font("assets/font.ttf", 20)
+    BIGFONT = pygame.font.Font("assets/font.ttf", 50)
+    # Botones y textos iniciales
     
-    # Create and label the buttons
-    HELP_SURF = BASICFONT.render("HELP", True, WHITE)
+    HELP_SURF = BASICFONT.render("Ayuda", True, WHITE)
     HELP_RECT = HELP_SURF.get_rect()
-    HELP_RECT.topleft = (WINDOWWIDTH - 180, WINDOWHEIGHT - 350)
-    NEW_SURF = BASICFONT.render("NEW GAME", True, WHITE)
-    NEW_RECT = NEW_SURF.get_rect()
-    NEW_RECT.topleft = (WINDOWWIDTH - 200, WINDOWHEIGHT - 200)
+    HELP_RECT.topleft = (WINDOWWIDTH - 205, WINDOWHEIGHT -135)
 
-    # The 'Shots:' label at the top
-    SHOTS_SURF = BASICFONT.render("Shots: ", True, WHITE)
-    SHOTS_RECT = SHOTS_SURF.get_rect()
-    SHOTS_RECT.topleft = (WINDOWWIDTH - 770, WINDOWHEIGHT - 570)
+    X_SURF = BASICFONT.render("X", True, BLUE)
+    X_RECT = X_SURF.get_rect()
+    X_RECT.topleft = (WINDOWWIDTH - 90, WINDOWHEIGHT -132)
     
-    # Load the explosion graphics from the /img folder
+    NEW_SURF = BASICFONT.render("New Game", True, WHITE)
+    NEW_RECT = NEW_SURF.get_rect()
+    NEW_RECT.topleft = (WINDOWWIDTH - 205, WINDOWHEIGHT - 200)
+
+    B_SURF = BASICFONT.render("B", True, RED)
+    B_RECT = B_SURF.get_rect()
+    B_RECT.topleft = (WINDOWWIDTH - 90, WINDOWHEIGHT -200)
+
+    SHOTS_SURF = BASICFONT.render("Ataques: ", True, WHITE)
+    SHOTS_RECT = SHOTS_SURF.get_rect()
+    SHOTS_RECT.topleft = (WINDOWWIDTH - 200, WINDOWHEIGHT - 348)
+
+
+
+    # Cargar imágenes de explosión
     EXPLOSION_IMAGES = [
         pygame.image.load("img/blowup1.png"), pygame.image.load("img/blowup2.png"),
-        pygame.image.load("img/blowup3.png"),pygame.image.load("img/blowup4.png"),
-        pygame.image.load("img/blowup5.png"),pygame.image.load("img/blowup6.png")]
-    
-    # Set the title in the menu bar to 'Battleship'
-    pygame.display.set_caption('Battleship')
+        pygame.image.load("img/blowup3.png"), pygame.image.load("img/blowup4.png"),
+        pygame.image.load("img/blowup5.png"), pygame.image.load("img/blowup6.png")
+    ]
 
-    # Keep the game running at all times
-    while True:
-        shots_taken = run_game() #Run the game until it stops and save the result in shots_taken
-        show_gameover_screen(shots_taken) #Display a gameover screen by passing in shots_taken
-        
-        
-def run_game():
-    """
-    Function is executed while a game is running.
     
-    returns the amount of shots taken
-    """
-    revealed_tiles = generate_default_tiles(False) #Contains the list of the tiles revealed by user
-    # main board object, 
-    main_board = generate_default_tiles(None) #Contains the list of the ships which exists on board
-    ship_objs = ['battleship','cruiser1','cruiser2','destroyer1','destroyer2',
-                 'destroyer3','submarine1','submarine2','submarine3','submarine4'] # List of the ships available
-    main_board = add_ships_to_board(main_board, ship_objs) #call add_ships_to_board to add the list of ships to the main_board
-    mousex, mousey = 0, 0 #location of mouse
-    counter = [] #counter to track number of shots fired
-    xmarkers, ymarkers = set_markers(main_board) #The numerical markers on each side of the board
-        
+    while not return_to_menu:
+        shots_taken = run_game()  # Ejecutar el juego
+        show_gameover_screen(shots_taken)  # Pantalla de fin de juego
+
+
+def run_game():
+    revealed_tiles = generate_default_tiles(False)
+    main_board = generate_default_tiles(None)
+    ship_objs = ['battleship', 'cruiser1', 'cruiser2', 'destroyer1', 'destroyer2',
+                 'destroyer3', 'submarine1', 'submarine2', 'submarine3', 'submarine4']
+    main_board = add_ships_to_board(main_board, ship_objs)
+
+    xmarkers, ymarkers = set_markers(main_board)
+    counter = []  # Contador de ataques
+    hits_counter = 0  # Contador de aciertos
+    cursor_x, cursor_y = 0, 0  # Posición inicial del cursor
+    mousex, mousey = 0, 0  # Para mouse
+
+    aux_tilex = 0  # Auxiliares para sonido, evitan que selección se repita en loop
+    aux_tiley = 0
+    current_message = ""  # Variable para almacenar el mensaje actual
+    message_timer = 0  # Temporizador para mostrar el mensaje por un tiempo limitado
+    GBG = pygame.image.load("assets/game_background.jpg")
     while True:
-        # counter display (it needs to be here in order to refresh it)
+        # Mostrar contador de aciertos
+        HITS_SURF = BASICFONT.render(f"Aciertos: {hits_counter}", True, WHITE)
+        HITS_RECT = SHOTS_SURF.get_rect()
+        HITS_RECT.topleft = (WINDOWWIDTH - 200, WINDOWHEIGHT - 275)
+
         COUNTER_SURF = BASICFONT.render(str(len(counter)), True, WHITE)
         COUNTER_RECT = SHOTS_SURF.get_rect()
-        COUNTER_RECT.topleft = (WINDOWWIDTH - 650, WINDOWHEIGHT - 570)
-        
-        # Fill background
-        DISPLAYSURF.fill(BGCOLOR)
-        
-        # draw the buttons
+        COUNTER_RECT.topleft = (WINDOWWIDTH - 115, WINDOWHEIGHT - 348)
+
+        DISPLAYSURF.blit(GBG, (0, 0))
         DISPLAYSURF.blit(HELP_SURF, HELP_RECT)
+        DISPLAYSURF.blit(X_SURF, X_RECT)
+        DISPLAYSURF.blit(B_SURF, B_RECT)
         DISPLAYSURF.blit(NEW_SURF, NEW_RECT)
         DISPLAYSURF.blit(SHOTS_SURF, SHOTS_RECT)
         DISPLAYSURF.blit(COUNTER_SURF, COUNTER_RECT)
-        
-        # Draw the tiles onto the board and their respective markers
+        DISPLAYSURF.blit(HITS_SURF, HITS_RECT)
+                
+        # Crear textos "BATTLESHIP" y "STELIOS"
+        GAME_NAME = BASICFONT.render("BATTLESHIP", True, (182, 143, 64))  # Color #b68f40
+        GAME_NAME_RECT = GAME_NAME.get_rect()
+        GAME_NAME_RECT.topleft = (WINDOWWIDTH - 200, WINDOWHEIGHT - 515)
+
+        GAME_NAME1 = BASICFONT.render("STELIOS", True, (122, 163, 213))  # Color #7aa3d5
+        GAME_NAME1_RECT = GAME_NAME1.get_rect()
+        GAME_NAME1_RECT.topleft = (WINDOWWIDTH - 180, WINDOWHEIGHT - 500)
+
+        # Dentro del bucle principal en run_game()
+        DISPLAYSURF.blit(GAME_NAME, GAME_NAME_RECT)
+        DISPLAYSURF.blit(GAME_NAME1, GAME_NAME1_RECT)
+
         draw_board(main_board, revealed_tiles)
         draw_markers(xmarkers, ymarkers)
-        
-        mouse_clicked = False
 
-        check_for_quit()
-        #Check for pygame events
-        for event in pygame.event.get():
-            if event.type == MOUSEBUTTONUP:
-                if HELP_RECT.collidepoint(event.pos): #if the help button is clicked on 
-                    DISPLAYSURF.fill(BGCOLOR)
-                    show_help_screen() #Show the help screen
-                elif NEW_RECT.collidepoint(event.pos): #if the new game button is clicked on
-                    main() #goto main, which resets the game
-                else: #otherwise
-                    mousex, mousey = event.pos #set mouse positions to the new position
-                    mouse_clicked = True #mouse is clicked but not on a button
-            elif event.type == MOUSEMOTION: #Detected mouse motion
-                mousex, mousey = event.pos #set mouse positions to the new position
-        
-        #Check if the mouse is clicked at a position with a ship piece
-        tilex, tiley = get_tile_at_pixel(mousex, mousey) 
-        if tilex != None and tiley != None:
-            if not revealed_tiles[tilex][tiley]: #if the tile the mouse is on is not revealed
-                draw_highlight_tile(tilex, tiley) # draws the hovering highlight over the tile
-            if not revealed_tiles[tilex][tiley] and mouse_clicked: #if the mouse is clicked on the not revealed tile
-                reveal_tile_animation(main_board, [(tilex, tiley)])
-                revealed_tiles[tilex][tiley] = True #set the tile to now be revealed
-                if check_revealed_tile(main_board, [(tilex, tiley)]): # if the clicked position contains a ship piece
-                    left, top = left_top_coords_tile(tilex, tiley)
-                    blowup_animation((left, top)) 
-                    if check_for_win(main_board, revealed_tiles): # check for a win
-                        counter.append((tilex, tiley))
-                        return len(counter) # return the amount of shots taken
-                counter.append((tilex, tiley))
+        # Mostrar texto estático "Estado"
+        estado_surface = BASICFONT.render("Estado", True, WHITE)
+        estado_rect = estado_surface.get_rect()
+        estado_rect.topleft = (631, 155)  # Posición fija en la parte superior izquierda
+        DISPLAYSURF.blit(estado_surface, estado_rect)
+
+        # Mostrar mensaje dinámico debajo de "Estado"
+        if current_message and message_timer > 0:
+            # Seleccionar color según el mensaje
+            if current_message == "Impacto":
+                message_color = (255, 255, 0)  # Amarillo
+            elif current_message == "Derribado":
+                message_color = (255, 0, 0)  # Rojo
+            else:
+                message_color = WHITE  # Blanco para otros mensajes
+
+            message_surface = BASICFONT.render(current_message, True, message_color)
+            message_rect = message_surface.get_rect()
+            message_rect.topleft = (628, 182)  # Justo debajo de "Estado"
+            DISPLAYSURF.blit(message_surface, message_rect)
+            message_timer = 2  # Reducir temporizador
+
+        if not arduino_connected:
+            # Apartado para funcionalidad del mouse
+            mouse_clicked = False
+            check_for_quit()
+            for event in pygame.event.get():
+                if event.type == MOUSEBUTTONUP:
+                    if HELP_RECT.collidepoint(event.pos):
+                        DISPLAYSURF.blit(GBG, (0, 0))
+                        show_help_screen()
+                    elif NEW_RECT.collidepoint(event.pos):
+                        main()
+                    else:
+                        mousex, mousey = event.pos
+                        mouse_clicked = True
+                elif event.type == MOUSEMOTION:
+                    mousex, mousey = event.pos
+
+            tilex, tiley = get_tile_at_pixel(mousex, mousey)
+
+            if tilex is not None and tiley is not None:
+                if not revealed_tiles[tilex][tiley]:
+                    if tilex != aux_tilex or tiley != aux_tiley:
+                        select_sound.play()
+                        aux_tilex = tilex
+                        aux_tiley = tiley
+
+                    draw_highlight_tile(tilex, tiley)
+                if not revealed_tiles[tilex][tiley] and mouse_clicked:
+                    resultado = process_attack(main_board, revealed_tiles, tilex, tiley)
+                    current_message = resultado  # Actualizar el mensaje actual
+                    message_timer = 60  # Mostrar mensaje por 60 cuadros (1 segundo si FPS=60)
+
+                    if resultado == "Impacto" or resultado == "Derribado":  # Incrementar aciertos solo en impacto
+                        hits_counter += 1
+
+                    fail_sound.play()
+                    reveal_tile_animation(main_board, [(tilex, tiley)])
+                    revealed_tiles[tilex][tiley] = True
+                    if check_revealed_tile(main_board, [(tilex, tiley)]):
+                        left, top = left_top_coords_tile(tilex, tiley)
+                        boom_sound.play()
+                        blowup_animation((left, top))
+                        if check_for_win(main_board, revealed_tiles):
+                            counter.append((tilex, tiley))
+                            return len(counter)
+                    counter.append((tilex, tiley))
+            pygame.display.update()
+        else:
+            joystick_data = read_joystick()
+            if joystick_data:
+                xValue = joystick_data["x"]
+                yValue = joystick_data["y"]
+                buttonY = joystick_data["buttonY"]
+                buttonB = joystick_data["buttonB"]
+                buttonA = joystick_data["buttonA"]
+                buttonX = joystick_data["buttonX"]
+                buttonSELECT = joystick_data["buttonSELECT"]
+
+                if xValue < 517:
+                    select_sound.play()
+                    cursor_x = max(cursor_x - 1, 0)
+                elif xValue > 518:
+                    select_sound.play()
+                    cursor_x = min(cursor_x + 1, BOARDWIDTH - 1)
+                if yValue > 497:
+                    select_sound.play()
+                    cursor_y = max(cursor_y - 1, 0)
+                elif yValue < 497:
+                    select_sound.play()
+                    cursor_y = min(cursor_y + 1, BOARDHEIGHT - 1)
+
+                if buttonA == 1:
+                    if not revealed_tiles[cursor_x][cursor_y]:
+                        resultado = process_attack(main_board, revealed_tiles, cursor_x, cursor_y)
+                        current_message = resultado
+                        message_timer = 60  # Mostrar mensaje por 60 cuadros
+
+                        if resultado == "Impacto" or resultado == "Derribado":  # Incrementar aciertos solo en impacto
+                            hits_counter += 1
+
+                        fail_sound.play()
+                        revealed_tiles[cursor_x][cursor_y] = True
+                        if check_revealed_tile(main_board, [(cursor_x, cursor_y)]):
+                            left, top = left_top_coords_tile(cursor_x, cursor_y)
+                            boom_sound.play()
+                            blowup_animation((left, top))
+                            if check_for_win(main_board, revealed_tiles):
+                                counter.append((cursor_x, cursor_y))
+                                return len(counter)
+                        counter.append((cursor_x, cursor_y))
+                draw_highlight_tile(cursor_x, cursor_y)
+                pygame.display.update()
+                FPSCLOCK.tick(FPS)
+
+                if buttonY == 1:  # Si el botón del joystick está presionado
+                    pygame.quit()
+                    sys.exit()
+
+                if buttonX:  # Si el botón del joystick está presionado
+                    pygame.display.update()
+                    show_help_screen()
+                    pygame.display.update()
                 
-        pygame.display.update()
-        FPSCLOCK.tick(FPS)
+                if buttonB:  # Si el botón del joystick está presionado
+                    run_game()
+                    
 
+               
+
+
+
+
+# A partir de aqui son las funciones auxiliares
 
 def generate_default_tiles(default_value):
     """
@@ -172,7 +334,7 @@ def generate_default_tiles(default_value):
     
     return default_tiles
 
-    
+
 def blowup_animation(coord):
     """
     Function creates the explosition played if a ship is shot.
@@ -187,6 +349,7 @@ def blowup_animation(coord):
         FPSCLOCK.tick(EXPLOSIONSPEED) #Determine the delay to play the image with
 
 
+
 def check_revealed_tile(board, tile):
     """
     Function checks if a tile location contains a ship piece.
@@ -198,39 +361,51 @@ def check_revealed_tile(board, tile):
     return board[tile[0][0]][tile[0][1]] != None
 
 
+
 def reveal_tile_animation(board, tile_to_reveal):
     """
-    Function creates an animation which plays when the mouse is clicked on a tile, and whatever is
-    behind the tile needs to be revealed.
+    Function creates an animation which plays when the mouse is clicked on a tile,
+    and whatever is behind the tile needs to be revealed.
     
     board -> list of board tile tuples ('shipName', boolShot)
     tile_to_reveal -> tuple of tile coords to apply the reveal animation to
     """
-    for coverage in range(TILESIZE, (-REVEALSPEED) - 1, -REVEALSPEED): #Plays animation based on reveal speed
+    for coverage in range(TILESIZE, -1, -REVEALSPEED):  # Cobertura decrece correctamente
+        if coverage < 0:  # Evitar valores negativos
+            coverage = 0
         draw_tile_covers(board, tile_to_reveal, coverage)
 
-        
+
 def draw_tile_covers(board, tile, coverage):
     """
     Function draws the tiles according to a set of variables.
     
-    board -> list; of board tiles
-    tile -> tuple; of tile coords to reveal
+    board -> list of board tiles
+    tile -> tuple of tile coords to reveal
     coverage -> int; amount of the tile that is covered
     """
+    if coverage <= 0:  # Validación para evitar valores inválidos
+        return
+
     left, top = left_top_coords_tile(tile[0][0], tile[0][1])
+    ship_texture = pygame.image.load("assets/BARCOHUNDIDO.png")
+    water_texture = pygame.image.load("assets/BARCOHUNDIDO.png")
+    tile_texture = pygame.image.load("assets/BARCOHUNDIDO.png")
+
+    # Dibuja la textura según el estado del tile
     if check_revealed_tile(board, tile):
-        pygame.draw.rect(DISPLAYSURF, SHIPCOLOR, (left, top, TILESIZE,
-                                                  TILESIZE))
+        DISPLAYSURF.blit(ship_texture, (left, top))  # Mostrar textura de barco
     else:
-        pygame.draw.rect(DISPLAYSURF, BGCOLOR, (left, top, TILESIZE,
-                                                TILESIZE))
-    if coverage > 0:
-        pygame.draw.rect(DISPLAYSURF, TILECOLOR, (left, top, coverage,
-                                                  TILESIZE))
-            
+        DISPLAYSURF.blit(water_texture, (left, top))  # Mostrar textura de agua
+
+    # Añadir una animación de cobertura parcial
+    cover_surface = pygame.Surface((coverage, TILESIZE))
+    cover_surface.blit(tile_texture, (0, 0), (0, 0, coverage, TILESIZE))
+    DISPLAYSURF.blit(cover_surface, (left, top))
+
     pygame.display.update()
-    FPSCLOCK.tick(FPS)    
+    FPSCLOCK.tick(FPS)
+
 
 
 def check_for_quit():
@@ -264,30 +439,38 @@ def draw_board(board, revealed):
     board -> list of board tiles
     revealed -> list of revealed tiles
     """
-    #draws the grids depending on its state
+    # Cargar texturas y asegurarse de escalarlas a TILESIZE
+    tile_texture = pygame.image.load("assets/water_01.png")
+    ship_texture = pygame.image.load("assets/water_03.png")
+    water_texture = pygame.image.load("assets/water_04.png")
+    
+    tile_texture = pygame.transform.scale(tile_texture, (TILESIZE, TILESIZE))
+    ship_texture = pygame.transform.scale(ship_texture, (TILESIZE, TILESIZE))
+    water_texture = pygame.transform.scale(water_texture, (TILESIZE, TILESIZE))
+
     for tilex in range(BOARDWIDTH):
         for tiley in range(BOARDHEIGHT):
             left, top = left_top_coords_tile(tilex, tiley)
+
+            # Tile no revelado: siempre usar la textura del tile no revelado
             if not revealed[tilex][tiley]:
-                pygame.draw.rect(DISPLAYSURF, TILECOLOR, (left, top, TILESIZE,
-                                                          TILESIZE))
-            else:
-                if board[tilex][tiley] != None:
-                    pygame.draw.rect(DISPLAYSURF, SHIPCOLOR, (left, top, 
-                                     TILESIZE, TILESIZE))
-                else:
-                    pygame.draw.rect(DISPLAYSURF, BGCOLOR, (left, top, 
-                                     TILESIZE, TILESIZE))
-    #draws the horizontal lines            
+                DISPLAYSURF.blit(tile_texture, (left, top))
+            else:  # Tile revelado
+                if board[tilex][tiley] != None:  # Si hay un barco
+                    DISPLAYSURF.blit(ship_texture, (left, top))
+                else:  # Si no hay un barco
+                    DISPLAYSURF.blit(water_texture, (left, top))
+
+    # Dibujar líneas del tablero
     for x in range(0, (BOARDWIDTH + 1) * TILESIZE, TILESIZE):
         pygame.draw.line(DISPLAYSURF, DARKGRAY, (x + XMARGIN + MARKERSIZE,
-            YMARGIN + MARKERSIZE), (x + XMARGIN + MARKERSIZE, 
-            WINDOWHEIGHT - YMARGIN))
-    #draws the vertical lines
+                                                 YMARGIN + MARKERSIZE),
+                         (x + XMARGIN + MARKERSIZE, WINDOWHEIGHT - YMARGIN))
     for y in range(0, (BOARDHEIGHT + 1) * TILESIZE, TILESIZE):
-        pygame.draw.line(DISPLAYSURF, DARKGRAY, (XMARGIN + MARKERSIZE, y + 
-            YMARGIN + MARKERSIZE), (WINDOWWIDTH - (DISPLAYWIDTH + MARKERSIZE *
-            2), y + YMARGIN + MARKERSIZE))
+        pygame.draw.line(DISPLAYSURF, DARKGRAY, (XMARGIN + MARKERSIZE, y +
+                                                 YMARGIN + MARKERSIZE),
+                         (WINDOWWIDTH - (DISPLAYWIDTH + MARKERSIZE * 2),
+                          y + YMARGIN + MARKERSIZE))
 
         
 def set_markers(board):
@@ -337,39 +520,52 @@ def draw_markers(xlist, ylist):
 
 def add_ships_to_board(board, ships):
     """
-    Function goes through a list of ships and add them randomly into a board.
-    
-    board -> list of board tiles
-    ships -> list of ships to place on board
-    returns list of board tiles with ships placed on certain tiles
+    Coloca barcos en el tablero y registra sus coordenadas en ship_positions.
     """
+    global ship_positions
+    ship_positions = {}
     new_board = board[:]
-    ship_length = 0
-    for ship in ships: #go through each ship declared in the list
-        #Randomly find a valid position that fits the ship
+    for ship in ships:
         valid_ship_position = False
         while not valid_ship_position:
             xStartpos = random.randint(0, 9)
             yStartpos = random.randint(0, 9)
-            isHorizontal = random.randint(0, 1) #vertical or horizontal positioning
-            #Type of ship and their respective length
-            if 'battleship' in ship:
-                ship_length = 4
-            elif 'cruiser' in ship:
-                ship_length = 3
-            elif 'destroyer'in ship:
-                ship_length = 2
-            elif 'submarine' in ship:
-                ship_length = 1
-            
-            #check if position is valid
-            valid_ship_position, ship_coords = make_ship_position(new_board,
-                xStartpos, yStartpos, isHorizontal, ship_length, ship)
-            #add the ship if it is valid
+            isHorizontal = random.randint(0, 1)
+            # Extraer el tipo de barco eliminando números del nombre
+            ship_type = ''.join([char for char in ship if not char.isdigit()])
+            ship_length = {'battleship': 4, 'cruiser': 3, 'destroyer': 2, 'submarine': 1}[ship_type]
+            valid_ship_position, ship_coords = make_ship_position(new_board, xStartpos, yStartpos, isHorizontal, ship_length, ship)
             if valid_ship_position:
                 for coord in ship_coords:
                     new_board[coord[0]][coord[1]] = ship
+                ship_positions[ship] = set(ship_coords)  # Guardar coordenadas como conjunto
     return new_board
+
+
+def process_attack(board, revealed_tiles, x, y):
+    """
+    Procesa un ataque en la posición (x, y) del tablero.
+    """
+    global ship_positions
+
+    if revealed_tiles[x][y]:  # Si ya está revelado
+        return "Ya revelado"
+
+    revealed_tiles[x][y] = True  # Revelar la casilla
+
+    if board[x][y] is None:  # Si no hay barco en esta casilla
+        return "Agua"
+
+    # Hay un barco en esta casilla
+    ship = board[x][y]
+    ship_positions[ship].remove((x, y))  # Eliminar coordenada del barco
+
+    if not ship_positions[ship]:  # Si no quedan partes del barco
+        del ship_positions[ship]  # Eliminar barco del rastreo
+        return "Derribado"
+    return "Impacto"
+
+
 
 
 def make_ship_position(board, xPos, yPos, isHorizontal, length, ship):
@@ -457,45 +653,78 @@ def draw_highlight_tile(tilex, tiley):
     tiley -> int; y position of tile
     """
     left, top = left_top_coords_tile(tilex, tiley)
-    pygame.draw.rect(DISPLAYSURF, HIGHLIGHTCOLOR,
-                    (left, top, TILESIZE, TILESIZE), 4)
-
+    highlight_texture = pygame.image.load("assets/water_02.png")  # Textura de resaltado
+    DISPLAYSURF.blit(highlight_texture, (left, top))
 
 def show_help_screen():
     """
     Function display a help screen until any button is pressed.
     """
-    line1_surf, line1_rect = make_text_objs('Press a key to return to the game', 
-                                            BASICFONT, TEXTCOLOR)
+    DISPLAYSURF.fill("black")
+    pygame.display.update()
+    line1_surf, line1_rect = make_text_objs('Deje de presionar X para volver, presiona Y para salir', 
+                                            BASICFONT, SHIPCOLOR)
     line1_rect.topleft = (TEXT_LEFT_POSN, TEXT_HEIGHT)
     DISPLAYSURF.blit(line1_surf, line1_rect)
     
     line2_surf, line2_rect = make_text_objs(
-        'This is a battleship puzzle game. Your objective is ' \
-        'to sink all the ships in as few', BASICFONT, TEXTCOLOR)
+        'Este es el juego de Battleship.', BASICFONT, TEXTCOLOR)
     line2_rect.topleft = (TEXT_LEFT_POSN, TEXT_HEIGHT * 3)
     DISPLAYSURF.blit(line2_surf, line2_rect)
 
-    line3_surf, line3_rect = make_text_objs('shots as possible. The markers on'\
-        ' the edges of the game board tell you how', BASICFONT, TEXTCOLOR)
+    line3_surf, line3_rect = make_text_objs('Realiza disparos a los recuadros e intenta acertar', BASICFONT, TEXTCOLOR)
     line3_rect.topleft = (TEXT_LEFT_POSN, TEXT_HEIGHT * 4)
     DISPLAYSURF.blit(line3_surf, line3_rect)
 
-    line4_surf, line4_rect = make_text_objs('many ship pieces are in each'\
-        ' column and row. To reset your game click on', BASICFONT, TEXTCOLOR)
+    line4_surf, line4_rect = make_text_objs('a un objetivo (barco), estos estaran distribuidos al azar,', BASICFONT, TEXTCOLOR)
     line4_rect.topleft = (TEXT_LEFT_POSN, TEXT_HEIGHT * 5)
     DISPLAYSURF.blit(line4_surf, line4_rect)
 
-    line5_surf, line5_rect = make_text_objs('the "New Game" button.',
+    line5_surf, line5_rect = make_text_objs('los numeros en filas y columnas representan cuantas casillas con barco tienen',
         BASICFONT, TEXTCOLOR)
     line5_rect.topleft = (TEXT_LEFT_POSN, TEXT_HEIGHT * 6)
     DISPLAYSURF.blit(line5_surf, line5_rect)
-    
-    while check_for_keypress() == None: #Check if the user has pressed keys, if so go back to the game
-        pygame.display.update()
-        FPSCLOCK.tick()
 
-        
+    line6_surf, line6_rect = make_text_objs('para ganar derriba todos los barcos enemigos en el menor numero de disparos.', BASICFONT, TEXTCOLOR)
+    line6_rect.topleft = (TEXT_LEFT_POSN, TEXT_HEIGHT * 7)
+    DISPLAYSURF.blit(line6_surf, line6_rect)
+
+    line7_surf, line7_rect = make_text_objs('Para reiniciar la partida, es decir Nueva Partida, presiona B', BASICFONT, TEXTCOLOR)
+    line7_rect.topleft = (TEXT_LEFT_POSN, TEXT_HEIGHT * 9)
+    DISPLAYSURF.blit(line7_surf, line7_rect)
+
+    line8_surf, line8_rect = make_text_objs('Juego realizado para la asignatura', BASICFONT, (128, 128, 128))
+    line8_rect.topleft = (TEXT_LEFT_POSN, TEXT_HEIGHT * 20)
+    DISPLAYSURF.blit(line8_surf, line8_rect)
+
+    line8_surf, line8_rect = make_text_objs('Sistemas de comunicaciones', BASICFONT, (128, 128, 128))
+    line8_rect.topleft = (TEXT_LEFT_POSN, TEXT_HEIGHT * 21)
+    DISPLAYSURF.blit(line8_surf, line8_rect)
+
+    line9_surf, line9_rect = make_text_objs('Por equipo: 9', BASICFONT, (128, 128, 128))
+    line9_rect.topleft = (TEXT_LEFT_POSN, TEXT_HEIGHT * 22)
+    DISPLAYSURF.blit(line9_surf, line9_rect)
+    
+
+    if arduino_connected == True:
+        joystick_data = read_joystick()
+        if joystick_data:  # Si los datos no son None
+                xValue = joystick_data["x"]
+                yValue = joystick_data["y"]
+                buttonY = joystick_data["buttonY"]
+                buttonB = joystick_data["buttonB"]
+                buttonA = joystick_data["buttonA"]
+                buttonX = joystick_data["buttonX"]
+                buttonSELECT = joystick_data["buttonSELECT"]
+
+                if buttonB == 1: #Check if the user has pressed keys, if so go back to the game
+                    pygame.display.update()
+                    FPSCLOCK.tick()
+    else: 
+        while check_for_keypress() == None: #Check if the user has pressed keys, if so go back to the game
+            pygame.display.update()
+            FPSCLOCK.tick()
+
 def check_for_keypress():
     """
     Function checks for any key presses by pulling out all KEYDOWN and KEYUP events from queue.
@@ -523,41 +752,68 @@ def make_text_objs(text, font, color):
 
 
 def show_gameover_screen(shots_fired):
+    win_sound.play()
     """
-    Function display a gameover screen when the user has successfully shot at every ship pieces.
+    Function displays a victory screen when the user has successfully hit every ship piece.
     
-    shots_fired -> the number of shots taken before game is over
+    shots_fired -> the number of shots taken before the game is over
     """
-    DISPLAYSURF.fill(BGCOLOR)
-    titleSurf, titleRect = make_text_objs('Congrats! Puzzle solved in:',
-                                            BIGFONT, TEXTSHADOWCOLOR)
-    titleRect.center = (int(WINDOWWIDTH / 2), int(WINDOWHEIGHT / 2))
-    DISPLAYSURF.blit(titleSurf, titleRect)
     
-    titleSurf, titleRect = make_text_objs('Congrats! Puzzle solved in:', 
-                                            BIGFONT, TEXTCOLOR)
-    titleRect.center = (int(WINDOWWIDTH / 2) - 3, int(WINDOWHEIGHT / 2) - 3)
-    DISPLAYSURF.blit(titleSurf, titleRect)
-    
-    titleSurf, titleRect = make_text_objs(str(shots_fired) + ' shots', 
-                                            BIGFONT, TEXTSHADOWCOLOR)
-    titleRect.center = (int(WINDOWWIDTH / 2)), int(WINDOWHEIGHT / 2 + 50)
-    DISPLAYSURF.blit(titleSurf, titleRect)
-    
-    titleSurf, titleRect = make_text_objs(str(shots_fired) + 'shots', 
-                                            BIGFONT, TEXTCOLOR)
-    titleRect.center = (int(WINDOWWIDTH / 2), int(WINDOWHEIGHT / 2 + 50) - 3)
+    # Cargar la imagen de fondo para la pantalla de victoria
+    victory_bg = pygame.image.load("assets/victory_background.jpg")
+    victory_bg = pygame.transform.scale(victory_bg, (WINDOWWIDTH, WINDOWHEIGHT))  # Escalar al tamaño de la ventana
+    DISPLAYSURF.blit(victory_bg, (0, 0))
+
+    # Mostrar los textos de victoria
+
+    titleSurf, titleRect = make_text_objs('¡Felicidades! Has ganado.', BIGFONT, TEXTSHADOWCOLOR)
+    titleRect.center = (int((WINDOWWIDTH / 2)-3), int((WINDOWHEIGHT / 2) - 50)-3)
     DISPLAYSURF.blit(titleSurf, titleRect)
 
-    pressKeySurf, pressKeyRect = make_text_objs(
-        'Press a key to try to beat that score.', BASICFONT, TEXTCOLOR)
-    pressKeyRect.center = (int(WINDOWWIDTH / 2), int(WINDOWHEIGHT / 2) + 100)
+    titleSurf, titleRect = make_text_objs('¡Felicidades! Has ganado.', BIGFONT, TEXTCOLOR)
+    titleRect.center = (int(WINDOWWIDTH / 2), int(WINDOWHEIGHT / 2) - 50)
+    DISPLAYSURF.blit(titleSurf, titleRect)
+
+    shotsSurf, shotsRect = make_text_objs(f'Tiros realizados: {shots_fired}', BASICFONT, TEXTSHADOWCOLOR)
+    shotsRect.center = (int((WINDOWWIDTH / 2) - 3 ), int((WINDOWHEIGHT / 2) + 20)-3)
+    DISPLAYSURF.blit(shotsSurf, shotsRect)
+
+    shotsSurf, shotsRect = make_text_objs(f'Tiros realizados: {shots_fired}', BASICFONT, WHITE)
+    shotsRect.center = (int(WINDOWWIDTH / 2), int(WINDOWHEIGHT / 2) + 20)
+    DISPLAYSURF.blit(shotsSurf, shotsRect)
+
+    
+    pressKeySurf, pressKeyRect = make_text_objs('Presiona una tecla para jugar de nuevo', BASICFONT, TEXTSHADOWCOLOR)
+    pressKeyRect.center = ((int(WINDOWWIDTH / 2)-3), int((WINDOWHEIGHT / 2) + 80)-3)
     DISPLAYSURF.blit(pressKeySurf, pressKeyRect)
+
+    pressKeySurf, pressKeyRect = make_text_objs('Presiona una tecla para jugar de nuevo', BASICFONT, WHITE)
+    pressKeyRect.center = (int(WINDOWWIDTH / 2), int(WINDOWHEIGHT / 2) + 80)
+    DISPLAYSURF.blit(pressKeySurf, pressKeyRect)
+
     
-    while check_for_keypress() == None: #Check if the user has pressed keys, if so start a new game
-        pygame.display.update()
-        FPSCLOCK.tick()    
-        
-    
-if __name__ == "__main__": #This calls the game loop
+    pygame.display.update()
+
+    # Bucle de espera para reiniciar o salir
+    waiting = True
+    while waiting:
+        if arduino_connected:
+            joystick_data = read_joystick()
+            if joystick_data and joystick_data["buttonA"]:  # Botón A presionado
+                waiting = False
+        else:
+            for event in pygame.event.get():
+                if event.type == pygame.QUIT:
+                    pygame.quit()
+                    sys.exit()
+                if event.type == pygame.KEYDOWN or event.type == pygame.MOUSEBUTTONDOWN:
+                    waiting = False  # Salir del bucle para iniciar una nueva partida
+
+        FPSCLOCK.tick(FPS)
+
+    # Reiniciar el juego al salir del bucle
+    main()
+
+
+if __name__ == "__main__":
     main()
